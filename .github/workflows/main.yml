@@ -1,0 +1,65 @@
+
+name: CI Pipeline - Prov QA
+
+on:
+  workflow_dispatch:  # Desencadenar manualmente desde la interfaz de usuario de GitHub
+    inputs:
+      app_container_name: 
+        description: 'Nombre del contenedor'
+        required: true
+        default: 'proveedores-app-qa'
+
+env:
+  SSH_PRIVATE_KEY: ${{ secrets.PEM_PROV_QA }}
+  REMOTE_USER: ec2-user
+  REMOTE_HOST: ${{ secrets.IP_PROV_QA }}
+  GH_TOKEN: ${{ secrets.TOKEN_PROV }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      
+      - name: Build Docker Image 
+        run: |
+          # Construir la imagen Docker
+          sudo pwd
+          docker build . -t 471626/imagen-prov-qa:latest
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.TOKEN_PROV_QA }}" | docker login -u 471626 --password-stdin
+
+      - name: Push to Docker Hub
+        run: docker push 471626/imagen-prov-qa:latest
+      
+      - name: Install Docker and Dependencies
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.REMOTE_HOST }}
+          username: ${{ env.REMOTE_USER }}
+          key: ${{ env.SSH_PRIVATE_KEY }}
+          script: |
+            # Instalar Docker si no está instalado
+            if ! command -v docker > /dev/null; then
+                sudo yum install docker -y
+            else
+                echo "Docker is already installed."
+            fi
+            
+            # Iniciar el servicio Docker si no está en ejecución
+            if systemctl is-active --quiet docker; then
+                echo "Docker service is already running."
+            else
+                sudo systemctl start docker
+            fi          
+            
+            # Agregar el usuario al grupo Docker para evitar el uso de sudo
+            sudo usermod -aG docker ${{ env.REMOTE_USER }}
+
+      - name: Deploy to QA Environment (using secrets)
+        run:
+          # Descargar la imagen Docker y ejecutar el contenedor
+          docker pull 471626/imagen-prov-qa && docker run -d -p 3000:3000 471626/imagen-prov-qa
